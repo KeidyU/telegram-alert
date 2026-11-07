@@ -11,7 +11,14 @@ import sys
 
 from dotenv import load_dotenv
 
-load_dotenv()
+# Folder holding .env, bancos.txt and the .session file: next to the .exe
+# when frozen with PyInstaller (sys.executable), otherwise next to this file.
+if getattr(sys, "frozen", False):
+    BASE_DIR = os.path.dirname(sys.executable)
+else:
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 # --- Matching rule ---------------------------------------------------------
 # A message is treated as an alert only if ALL of these hold (see
@@ -26,7 +33,7 @@ load_dotenv()
 # bancos.txt has one bank per line: "<CODE>  <Full name>" (2+ spaces
 # between them), e.g. "BDV  BANCO DE VENEZUELA". Lines with no separate
 # full name (e.g. "BANPLUS") use the same value for both.
-BANCOS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bancos.txt")
+BANCOS_FILE = os.path.join(BASE_DIR, "bancos.txt")
 
 
 def load_bancos() -> dict:
@@ -113,7 +120,15 @@ def get_api_hash() -> str:
 def get_chat_id():
     """Returns an int if the .env value is numeric, otherwise the raw string
     (so a @username also works)."""
-    raw = _require(CHAT_ID_RAW, "TELEGRAM_CHAT_ID")
+    if not CHAT_ID_RAW:
+        print(
+            "ERROR: TELEGRAM_CHAT_ID is not set. Run `BDVAlert.exe --list-chats` "
+            "(or `python main.py --list-chats`) to find the chat's ID, then set "
+            "TELEGRAM_CHAT_ID in .env.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    raw = CHAT_ID_RAW
     try:
         return int(raw)
     except ValueError:

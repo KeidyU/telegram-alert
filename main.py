@@ -18,6 +18,7 @@ Usage:
 """
 
 import argparse
+import os
 import re
 import sys
 import threading
@@ -155,7 +156,10 @@ def main():
     api_id = config.get_api_id()
     api_hash = config.get_api_hash()
 
-    client = TelegramClient(config.SESSION_NAME, api_id, api_hash)
+    # Absolute path so the login is found no matter which folder the exe is
+    # launched from (double-click, shortcut, terminal).
+    session_path = os.path.join(config.BASE_DIR, config.SESSION_NAME)
+    client = TelegramClient(session_path, api_id, api_hash)
 
     with client:
         if args.list_chats:
@@ -171,3 +175,12 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("\nStopped.")
         sys.exit(0)
+    except SystemExit as e:
+        # When the .exe is double-clicked, keep the console open long enough
+        # to read the error before the window closes.
+        if getattr(sys, "frozen", False) and e.code not in (0, None):
+            try:
+                input("Press Enter to exit...")
+            except EOFError:
+                pass
+        raise

@@ -23,7 +23,14 @@ venv\Scripts\python main.py
 
 # Compile-check after edits (no test suite exists)
 venv\Scripts\python -m py_compile main.py config.py
+
+# Build standalone dist\BDVAlert.exe (PyInstaller onefile) + copy .env/bancos.txt next to it
+.\build.ps1
 ```
+
+`config.BASE_DIR` is the exe's folder when frozen, and the source folder otherwise.
+`.env`, `bancos.txt` and the `.session` file are always resolved against it, never against
+the CWD or PyInstaller's temp `_MEIPASS` dir.
 
 There is no test suite, linter, or build step configured. To sanity-check changes to the
 matching logic, run `message_matches()` from `main.py` against the sample messages in
@@ -72,6 +79,72 @@ Three files carry all the logic:
     `winsound.PlaySound("SystemExclamation", ...)` in a background thread (kept off the
     asyncio loop so it doesn't block Telethon); `OPEN_BROWSER_ON_MATCH` (top-of-file toggle
     in `main.py`) optionally opens `config.BDV_URL`.
+
+## Roadmap
+
+This project evolves in phases. Each phase is additive — earlier phases keep working,
+selected via `ALERT_MODE` in `.env` once Phase 1 lands.
+
+### Phase 0 — Windows personal alert (current, shipped)
+What exists today: `main.py` logs in as a personal Telegram user account (Telethon) to
+monitor one chat, and on a match shows a Windows toast, plays a repeating system sound,
+and optionally opens `BDV_URL` in the default browser. Single operator, runs on their own
+Windows PC, no server, no other subscribers.
+
+### Phase 1 — Telegram bot alert via self-hosted n8n (next)
+Goal: let other people subscribe (by email) and get a push notification on their phone
+that they can tap to open the bank, without building a mobile app. Scope for the MVP: one
+subscriber, one bank (BDV).
+
+- The Phase 0 Telethon listener keeps running (unchanged matching logic), but moves to a
+  systemd service on the KVM4 VPS instead of a Windows desktop.
+- A new `ALERT_MODE` setting in `.env` (`windows` | `mobile`) selects the reaction path in
+  `main.py`, so Phase 0's behavior is preserved and selectable, not removed:
+  - `ALERT_MODE=windows` (default): today's Windows toast + sound + browser open.
+  - `ALERT_MODE=mobile`: POST the match (bank + message) to an n8n webhook instead, with a
+    shared-secret header.
+- n8n owns everything past the webhook: a `subscribers` Data table (chat_id, email,
+  created_at), a single Telegram Trigger workflow on the notify bot that handles signup
+  end-to-end (`/start` creates the row and asks for an email; the subscriber's next message
+  fills it in), and a Webhook workflow that messages each subscriber with an inline "Open
+  bank" URL button pointing at `BDV_URL`.
+- Two distinct Telegram identities, never shared: the existing user account only reads the
+  source chat; a new bot (via @BotFather) only sends outbound alerts — this split is
+  required because Telegram inline buttons are a bot-only feature.
+- See `plan-migration-to-hosting.md` for the detailed implementation plan.
+
+**Note — multi-bank support (future):** Phase 1 above is scoped to one bank (BDV). When
+more banks are added (the matching logic already supports this via `TARGET_BANK_CODES`),
+keep one shared notify bot rather than one bot per bank: each subscriber picks which banks
+they care about (a field on their `subscribers` row), and the alert message states which
+bank triggered plus the right URL button. A bot per bank means a new bot token + n8n
+credential + separate subscription per bank for every bank added — linear complexity for
+no technical benefit. The only argument for a dedicated bot per bank is branding/
+co-ownership, which is a business call, not a technical one.
+
+### Phase 2 — Native mobile app (future)
+Goal: a dedicated app with native push notifications (FCM/APNs) and, if the bank ever
+exposes one, a true in-app deep link instead of a website URL. Not started — this is a
+materially larger effort (app build/signing/distribution, device-token registration,
+notification handling) than Phase 1, and is deliberately deferred until Phase 1 validates
+that people actually want to subscribe.
+
+### Phase 3 — Scale (future, not started)
+Goal: handle subscriber counts where Phase 1's design breaks down — written down now so
+it isn't rediscovered from scratch later, not because it's needed yet (Phase 1 is one
+subscriber). Known limits, in order of what bites first:
+- Workflow count never scales with subscribers — "Subscribe" and "Alert" stay as two fixed
+  n8n workflows at any scale. What has to scale is the data/queue layer behind them, never
+  one-workflow-per-user.
+- Looping over every subscriber inside a single webhook execution breaks down well before
+  very large subscriber counts — n8n needs **queue mode** (Redis + multiple worker
+  processes) so "Alert" enqueues a fan-out job instead of iterating inline.
+- The real ceiling isn't n8n — it's the **Telegram Bot API's own rate limit** (~30
+  messages/sec per bot). Sequentially notifying a very large subscriber base through one
+  bot would take hours; fixing that means sharding across bots and/or leaning on Phase 2's
+  native-app push (FCM/APNs multicast), which is built for mass delivery.
+- The `subscribers` store moves from an n8n Data table (fine at Phase 1's scale) to a real
+  database (e.g. Postgres), with n8n orchestrating rather than storing.
 
 ## Configuration
 

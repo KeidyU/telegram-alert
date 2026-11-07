@@ -115,6 +115,27 @@ Leave this running. When a matching message arrives you'll get:
 
 Stop it any time with `Ctrl+C`.
 
+## 7. Running on another PC (standalone .exe)
+
+Build a single exe that doesn't need Python on the target machine:
+
+```powershell
+.\build.ps1
+```
+
+This produces `dist\` with `BDVAlert.exe`, `bancos.txt`, `.env.example` and
+your `.env` (if present). It never copies the `.session` file. The exe always reads
+`.env`, `bancos.txt` and the session file from its own folder.
+
+On the other PC:
+
+1. Copy the `dist\` folder. Make sure `.env` has that account's
+   `TELEGRAM_API_ID` / `TELEGRAM_API_HASH`.
+2. Open a terminal in that folder and run `BDVAlert.exe --list-chats`. Log in
+   (phone, code, 2FA) and copy the right chat ID.
+3. Put that ID in `TELEGRAM_CHAT_ID` in `.env`.
+4. Run `BDVAlert.exe` (from a terminal or by double-click).
+
 ## Security notes
 
 - **Never share or commit `bdv_monitor.session` (or `.env`).** The session
